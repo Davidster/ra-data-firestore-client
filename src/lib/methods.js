@@ -100,20 +100,41 @@ const save = async (
     uploadResults.map(uploadResult => (uploadResult ? Object.assign(data, uploadResult) : false));
   }
 
-  if (isNew) {
-    Object.assign(data, { [timestampFieldNames.createdAt]: new Date() });
+  if(isNew) {
+    const doc = await firebase.firestore()
+      .doc(`${resourcePath}/${id}`)
+      .get()
+    if(doc.exists) {
+      throw new Error('ID already in use');
+    }
   }
 
-  data = Object.assign(previous, { [timestampFieldNames.updatedAt]: new Date() }, data);
+  // if (isNew) {
+  //   Object.assign(data, { [timestampFieldNames.createdAt]: new Date() });
+  // }
+  //
+  // data = Object.assign(previous, { [timestampFieldNames.updatedAt]: new Date() }, data);
 
-  if (!data.id) {
+  delete data.id;
+
+  if (data.fb_sub_id) {
+    data.id = data.fb_sub_id;
+    delete data.fb_sub_id;
+  }
+
+  if(id) {
+    await firebase
+      .firestore()
+      .doc(`${resourcePath}/${id}`)
+      .set(firebaseSaveFilter(data));
     data.id = id;
+  } else {
+    data = await firebase
+      .firestore()
+      .collection(resourcePath)
+      .add(firebaseSaveFilter(data));
   }
 
-  await firebase
-    .firestore()
-    .doc(`${resourcePath}/${data.id}`)
-    .set(firebaseSaveFilter(data));
   return { data };
 };
 
@@ -146,16 +167,12 @@ const delMany = async (ids, resourceName, previousData) => {
 };
 
 const getItemID = (params, type, resourceName, resourcePath, resourceData) => {
-  let itemId = params.data.id || params.id || params.data.key || params.key;
+  let itemId = params.id || params.data.id || params.data.key || params.key;
   if (!itemId) {
     itemId = firebase
       .firestore()
       .collection(resourcePath)
       .doc().id;
-  }
-
-  if (!itemId) {
-    throw new Error('ID is required');
   }
 
   if (resourceData && resourceData[itemId] && type === CREATE) {
@@ -176,15 +193,18 @@ const getOne = async (params, resourceName, resourceData) => {
     if (result.exists) {
       const data = result.data();
 
-      if (data && data.id == null) {
+      if (data) {
+        if (data.id != null) {
+          data['fb_sub_id'] = data.id;
+        }
         data['id'] = result.id;
       }
       return { data: data };
     } else {
-      throw new Error('Id not found');
+      return { data: {} };
     }
   } else {
-    throw new Error('Id not found');
+    return { data: {} };
   }
 };
 
@@ -205,7 +225,10 @@ const getList = async (params, resourceName, resourceData) => {
 
     for (const snapshot of snapshots.docs) {
       const data = snapshot.data();
-      if (data && data.id == null) {
+      if (data) {
+        if (data.id != null) {
+          data['fb_sub_id'] = data.id;
+        }
         data['id'] = snapshot.id;
       }
       values.push(data);
